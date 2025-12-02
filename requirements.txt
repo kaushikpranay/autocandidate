@@ -1,0 +1,7 @@
+pandas
+python-jobspy
+gspread
+google-auth
+pdfminer.six
+requests
+python-dotenv
