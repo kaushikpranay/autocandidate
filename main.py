@@ -24,48 +24,61 @@ def build_search_terms():
 
 def run_scraper(search_terms):
     all_jobs = []
-    site_names = ["linkedin","indeed","glassdoor","zip_recruiter"]
+    site_names = [
+        "linkedin","indeed","glassdoor","zip_recruiter",
+        "remotive","remoteok","weworkremotely","simplyhired",
+        "jobspresso","outsourcely","toptal","skipthedrive",
+        "nodesk","remotehabits","remote4me","pangian",
+        "remotees","europeremotely","angel","freelancer",
+        "workingnomads","virtualvocations","remotefreelance"
+    ]
+
     for term in search_terms:
-        logging.info(f"Scraping term: {term}")
+        logging.info(f"Scraping: {term}")
+
         try:
             jobs = scrape_jobs(
                 site_name=site_names,
                 search_term=term,
-                google_search_term=f"{term} jobs in {SEARCH_LOCATION} since yesterday",
                 location=SEARCH_LOCATION,
                 results_wanted=JOBS_PER_TERM,
-                hours_old=72
+                hours_old=24
             )
+
             if jobs is not None and not jobs.empty:
                 jobs['keyword_source'] = term
                 all_jobs.append(jobs)
-            time.sleep(6)
+
+            time.sleep(3)
+
         except Exception as e:
-            logging.warning(f"Scrape error for {term}: {e}")
+            logging.warning(f"Scraper error for term {term}: {e}")
+
     if not all_jobs:
         return pd.DataFrame()
+
     return pd.concat(all_jobs, ignore_index=True)
 
 def normalize_and_filter(df):
     if df.empty:
         return df
-    df = df.rename(columns={
-        'site':'Platform','title':'Job Title','company':'Company',
-        'job_url':'Job URL','location':'Location','description':'Description Snippet',
-        'date_posted':'date_posted'
-    })
+    
     df['Date Scraped'] = datetime.utcnow().strftime("%Y-%m-%d")
     df['Application Status'] = "To Apply"
-    for c in TARGET_COLS:
-        if c not in df.columns:
-            df[c] = "N/A"
+
+    # Enforce 24-hour recency filter
     try:
-        cutoff = datetime.utcnow() - timedelta(hours=48)
-        df['date_posted'] = pd.to_datetime(df.get('date_posted'), errors='ignore')
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        df['date_posted'] = pd.to_datetime(df.get('date_posted'), errors='coerce')
         df = df[(df['date_posted'] >= cutoff) | (df['date_posted'].isna())]
     except:
         pass
-    return df[TARGET_COLS]
+
+    for c in TARGET_COLS:
+        if c not in df.columns:
+            df[c] = "N/A"
+
+    return df[TARGET_COLS + ["date_posted"]]
 
 def main():
     gc = auth_gspread()
@@ -73,17 +86,16 @@ def main():
 
     existing = fetch_existing_urls(sh)
     search_terms = build_search_terms()
-    raw = run_scraper(search_terms)
-    processed = normalize_and_filter(raw)
+    raw_jobs = run_scraper(search_terms)
+    processed = normalize_and_filter(raw_jobs)
 
     if processed.empty:
-        logging.info("No fresh jobs found")
+        logging.info("No new jobs found.")
         return
 
     processed['Job URL'] = processed['Job URL'].apply(lambda u: str(u).split('?')[0])
-    mask = ~processed['Job URL'].isin(existing)
-    new_rows = processed[mask]
-
+    new_rows = processed[~processed['Job URL'].isin(existing)]
+    
     appended = append_new_rows(sh, new_rows)
     logging.info(f"Appended {appended} rows")
 
