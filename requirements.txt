@@ -1,7 +1,9 @@
 pandas
-python-jobspy
+requests
+beautifulsoup4
+pdfminer.six
 gspread
 google-auth
-pdfminer.six
-requests
-python-dotenv
+google-auth-oauthlib
+google-auth-httplib2
+oauth2client
