@@ -67,21 +67,45 @@ def _patched_get(url, *args, **kwargs):
 requests.get = _patched_get
 
 # ---------- Helper: call scrape_jobs while handling location-kw mismatch ----------
+import inspect
+
 def call_scrape_jobs(search_terms, location=None, jobs_per_term=12):
     """
-    Try calling scrape_jobs with location kwarg. If that errors due to adapter
-    signature mismatch, retry without location. Returns whatever scrape_jobs returns.
+    Robust caller for jobspy.scrape_jobs:
+      - Introspects the callable's signature and only passes kwargs it accepts.
+      - Falls back to calling with just the positional search_terms if needed.
     """
+    # inspect what _scrape_jobs actually accepts
     try:
-        logging.info("Running scrape_jobs with location=%s jobs_per_term=%s", location, jobs_per_term)
-        return _scrape_jobs(search_terms, location=location, jobs_per_term=jobs_per_term)
+        sig = inspect.signature(_scrape_jobs)
+        accepted = set(sig.parameters.keys())
+    except (ValueError, TypeError):
+        # if signature can't be inspected, fall back to safest call
+        accepted = set()
+
+    # Build kwargs only for names accepted by the function
+    kwargs = {}
+    if "location" in accepted and location is not None:
+        kwargs["location"] = location
+    # some versions may accept "jobs_per_term" or "per_term" or similar; try a couple of common names
+    if "jobs_per_term" in accepted:
+        kwargs["jobs_per_term"] = jobs_per_term
+    elif "per_term" in accepted:
+        kwargs["per_term"] = jobs_per_term
+    elif "limit" in accepted:
+        kwargs["limit"] = jobs_per_term
+
+    # Try to call with constructed kwargs; fall back to minimal positional call if necessary
+    try:
+        logging.info("Calling scrape_jobs with kwargs=%s", kwargs)
+        return _scrape_jobs(search_terms, **kwargs) if kwargs else _scrape_jobs(search_terms)
     except TypeError as e:
-        # This usually happens when some adapter functions don't accept location kwarg.
-        logging.warning("scrape_jobs failed with TypeError when passing location: %s. Retrying without location.", e)
+        # Last-resort: try positional-only call and bubble up any other error
+        logging.warning("scrape_jobs call with kwargs failed: %s. Retrying with positional call.", e)
         try:
-            return _scrape_jobs(search_terms, jobs_per_term=jobs_per_term)
+            return _scrape_jobs(search_terms)
         except Exception as e2:
-            logging.error("scrape_jobs failed without location as well: %s", e2)
+            logging.error("scrape_jobs failed with positional call as well: %s", e2)
             raise
 
 
