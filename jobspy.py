@@ -1,4 +1,4 @@
-# jobspy.py
+﻿# jobspy.py
 # Minimal dependencies: requests, bs4 (BeautifulSoup), pandas
 # Optional: xml.etree for RSS parsing (stdlib)
 # NOTE: This is a reference implementation focused on clarity and safety.
@@ -342,7 +342,7 @@ LOG = logging.getLogger(__name__)
 # Edit this list to include the adapter modules your project actually provides.
 # If your adapters live under a package (e.g. autocandidate.adapters.<name>), add them there later.
 KNOWN_ADAPTERS = {"indeed", "naukri", "linkedin", "glassdoor", "monster", "fake"}
-DEFAULT_ADAPTERS = ["fake"]
+DEFAULT_ADAPTERS = ["remotive","remoteok"]
 
 def _import_adapter_module(name):
     candidates = [
