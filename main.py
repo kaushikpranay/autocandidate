@@ -146,6 +146,38 @@ def main():
         search_terms = ["aws", "cloud", "lambda", "automation", "through", "user", "engineer", "india"]
         # call the job scraper (robust wrapper)
         raw_jobs = call_scrape_jobs(search_terms, location=SEARCH_LOCATION, jobs_per_term=JOBS_PER_TERM)
+        # --- normalize wrapper for legacy list-of-dicts adapters ---
+        # Some adapters (or our fallback) may return a list of dicts with keys like
+        # 'title','company','location','url','snippet','date_posted'. Convert those
+        # into a DataFrame with the columns main.py expects so downstream code works.
+        if isinstance(raw_jobs, list):
+            import json
+            from datetime import datetime as _dt
+            normalized = []
+            for it in raw_jobs:
+                # be permissive about possible key names
+                title = it.get("title") or it.get("Job Title") or it.get("job_title") or ""
+                company = it.get("company") or it.get("Company") or it.get("company_name") or ""
+                location = it.get("location") or it.get("Location") or ""
+                posted = it.get("date_posted") or it.get("posted") or it.get("date") or ""
+                salary = it.get("salary") or it.get("Salary") or ""
+                url = it.get("url") or it.get("link") or it.get("Job URL") or ""
+                desc = it.get("snippet") or it.get("description") or it.get("Description") or ""
+                normalized.append({
+                    "Date Scraped": _dt.utcnow().strftime("%Y-%m-%d"),
+                    "Platform": it.get("platform") or it.get("source") or "",
+                    "Job Title": title,
+                    "Company": company,
+                    "Location": location,
+                    "Posted": posted,
+                    "Salary": salary,
+                    "Job URL": url,
+                    "Description": desc,
+                    "Raw": json.dumps(it, ensure_ascii=False)[:2000]
+                })
+            # convert to DataFrame so normalize_and_filter sees the expected columns
+            raw_jobs = pd.DataFrame(normalized)
+        # --- end normalize wrapper ---
 
         processed = normalize_and_filter(raw_jobs)
 

@@ -330,3 +330,127 @@ def scrape_jobs(site_name=None, search_term=None, google_search_term=None,
     # Reorder and return
     out = df[TARGET_COLS + ["date_posted"]]
     return out
+# ---- BEGIN PATCH: robust fallback scrape_jobs override ----
+# Defensive wrapper to avoid treating every search word as an adapter name.
+# This will override the existing scrape_jobs function with a safer implementation.
+import importlib
+import logging
+import os
+
+LOG = logging.getLogger(__name__)
+
+# Edit this list to include the adapter modules your project actually provides.
+# If your adapters live under a package (e.g. autocandidate.adapters.<name>), add them there later.
+KNOWN_ADAPTERS = {"indeed", "naukri", "linkedin", "glassdoor", "monster", "fake"}
+DEFAULT_ADAPTERS = ["fake"]
+
+def _import_adapter_module(name):
+    candidates = [
+        f"adapters.{name}",
+        f"{name}_adapter",
+        f"autocandidate.adapters.{name}",
+        f"autocandidate.{name}",
+        name
+    ]
+    for cand in candidates:
+        try:
+            mod = importlib.import_module(cand)
+            LOG.debug("Imported adapter module %s as candidate %s", cand, name)
+            return mod
+        except Exception:
+            continue
+    LOG.debug("No import succeeded for adapter %s", name)
+    return None
+
+def _call_adapter_search(mod, query, location, limit):
+    """
+    Try common adapter API shapes. Return list of jobs or [].
+    """
+    try:
+        if hasattr(mod, "search"):
+            return mod.search(query=query or None, location=location, limit=limit)
+        if hasattr(mod, "scrape"):
+            return mod.scrape(query or None, location=location, limit=limit)
+        # try direct callable (module implements __call__ or function named run)
+        if hasattr(mod, "run"):
+            return mod.run(query=query or None, location=location, limit=limit)
+        if callable(mod):
+            return mod(query=query or None, location=location, limit=limit)
+    except Exception:
+        LOG.exception("Adapter %s raised during search", getattr(mod, "__name__", str(mod)))
+    return []
+
+def _normalize_jobs(jobs):
+    if not jobs:
+        return []
+    out = []
+    seen = set()
+    for j in jobs:
+        # normalize a key to dedupe
+        url = None
+        if isinstance(j, dict):
+            url = j.get("url") or j.get("link")
+            key = url or (j.get("title"), j.get("company"))
+        else:
+            # not dict, fallback to string representation
+            key = str(j)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(j)
+    return out
+
+def scrape_jobs(*args, **kwargs):
+    """
+    Robust fallback scraper.
+    Signature compatible with older callers: accepts kwargs like location, jobs_per_term, query, terms.
+    Behavior:
+      - Ignore brittle token->adapter mapping.
+      - Use DEFAULT_ADAPTERS if no explicit adapters specified.
+      - Call adapters with (query, location, limit).
+    """
+    # try to preserve compatibility with callers
+    location = kwargs.get("location") or kwargs.get("loc") or os.environ.get("SEARCH_LOCATION")
+    # jobs_per_term may be passed as jobs_per_term, limit, or JOBS_PER_TERM env var
+    limit = kwargs.get("jobs_per_term") or kwargs.get("limit") or os.environ.get("JOBS_PER_TERM") or 12
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 12
+
+    # Query/terms may be provided as 'query' or 'terms' or 'q'
+    query = kwargs.get("query") or kwargs.get("terms") or kwargs.get("q") or ""
+
+    LOG.info("scrape_jobs (fallback) called with location=%r, query=%r, limit=%r", location, query, limit)
+
+    adapters_to_try = []
+
+    # If caller explicitly asked for adapters via kwargs['adapters'] (list/string), respect that
+    explicit = kwargs.get("adapters") or kwargs.get("adapter") or kwargs.get("adapters_list")
+    if explicit:
+        if isinstance(explicit, (list, tuple)):
+            adapters_to_try = [str(x).lower() for x in explicit if str(x).strip()]
+        else:
+            adapters_to_try = [str(s).strip().lower() for s in str(explicit).split(",") if s.strip()]
+
+    # if still empty, use defaults
+    if not adapters_to_try:
+        adapters_to_try = DEFAULT_ADAPTERS.copy()
+
+    LOG.debug("Adapters to try: %s", adapters_to_try)
+
+    all_jobs = []
+    for name in adapters_to_try:
+        mod = _import_adapter_module(name)
+        if not mod:
+            LOG.warning("Adapter module for %s not found; skipping", name)
+            continue
+        jobs = _call_adapter_search(mod, query=query, location=location, limit=limit)
+        if jobs:
+            all_jobs.extend(jobs)
+
+    unique = _normalize_jobs(all_jobs)
+    LOG.info("scrape_jobs (fallback) returning %d jobs", len(unique))
+    return unique
+
+# ---- END PATCH ----
