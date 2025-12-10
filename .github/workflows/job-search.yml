@@ -1,0 +1,94 @@
+name: Daily Job Search Automation
+
+on:
+  schedule:
+    # Runs at 8:00 AM UTC every day (adjust to your timezone)
+    - cron: '0 8 * * *'
+  
+  # Allows manual trigger from Actions tab
+  workflow_dispatch:
+
+jobs:
+  search-jobs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install requests beautifulsoup4 feedparser gspread oauth2client python-dateutil
+    
+    - name: Create credentials file
+      run: |
+        echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+    
+    - name: Run job search script
+      env:
+        GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      run: |
+        python job_search_automation.py
+    
+    - name: Clean up credentials
+      if: always()
+      run: |
+        rm -f credentials.json
+
+# ============================================================================
+# SETUP INSTRUCTIONS FOR GITHUB ACTIONS
+# ============================================================================
+# 
+# 1. Create a new GitHub repository (public or private)
+# 
+# 2. Add your Python script:
+#    - Save job_search_automation.py to the repo root
+#    - Commit and push
+# 
+# 3. Add GitHub Secrets (Settings → Secrets and variables → Actions):
+#    
+#    a) GOOGLE_CREDENTIALS_JSON:
+#       - Open your credentials.json file
+#       - Copy the ENTIRE contents
+#       - Paste as a new secret
+#    
+#    b) GOOGLE_SHEET_ID:
+#       - Copy your Sheet ID from the URL
+#       - Add as a new secret
+# 
+# 4. Update job_search_automation.py to read from environment:
+#    
+#    Add at the top of the script:
+#    
+#    import os
+#    GOOGLE_SHEET_ID = os.environ.get('GOOGLE_SHEET_ID', 'YOUR_SHEET_ID')
+#    
+#    And use 'credentials.json' (it will be created by workflow)
+# 
+# 5. Create this workflow file:
+#    - Create directory: .github/workflows/
+#    - Save this file as: job-search.yml
+#    - Commit and push
+# 
+# 6. Enable Actions:
+#    - Go to Actions tab in your GitHub repo
+#    - Enable workflows if prompted
+# 
+# 7. Test manually:
+#    - Go to Actions tab
+#    - Click "Daily Job Search Automation"
+#    - Click "Run workflow"
+#    - Check logs
+# 
+# 8. Automatic daily runs will start according to cron schedule
+# 
+# NOTES:
+# - Free tier: 2,000 minutes/month (plenty for daily 5-minute runs)
+# - Logs are available for 90 days
+# - Adjust cron schedule as needed (use https://crontab.guru)
+# - Cron runs in UTC timezone
